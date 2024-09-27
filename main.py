@@ -8,7 +8,7 @@ st.title("🌠 Meteorite Landings Dashboard")
 
 @st.cache_data
 def load_data():
-    df = pl.read_csv("E:\streamlit_project\.meteorite_landings\data\Meteorite_Landings_20240927.csv")
+    df = pl.read_csv("Meteorite_Landings_20240927.csv")
     return df
 
 def rename_columns(df):
