@@ -1,56 +1,52 @@
 import streamlit as st
 import polars as pl
 import plotly.express as px
-from sqlalchemy import create_engine, text
+from datetime import datetime
 
 st.set_page_config(page_title="Meteorite Landings Dashboard", layout="wide")
-
 st.title("🌠 Meteorite Landings Dashboard")
 
-# Create a SQLAlchemy engine
-connection_string = (
-    'mssql+pyodbc://JAMESKYCHOI/master?'
-    'driver=SQL+Server&'
-    'trusted_connection=yes'
-)
-engine = create_engine(connection_string)
-
 @st.cache_data
-def load_data(_sql, _engine):
-    with _engine.connect() as conn:
-        df = pl.read_database(_sql, conn)
+def load_data():
+    df = pl.read_csv("E:\streamlit_project\.meteorite_landings\data\Meteorite_Landings_20240927.csv")
     return df
 
 def rename_columns(df):
-    return df.rename({
+    rename_dict = {
         "name": "Name",
         "id": "ID",
         "nametype": "Name Type",
         "recclass": "Classification",
-        "mass_g": "Mass (g)",
         "fall": "Fall Status",
         "year": "Year",
         "reclat": "Latitude",
         "reclong": "Longitude",
         "GeoLocation": "GeoLocation"
-    })
+    }
+    # Only rename columns that exist in the dataframe
+    return df.rename({col: new_name for col, new_name in rename_dict.items() if col in df.columns})
 
 def process_data(df):
-    df = df.drop_nulls(subset=['Latitude', 'Longitude', 'Mass (g)'])
+    current_year = datetime.now().year
+    
+    # Check if 'Mass (g)' column exists, if not, look for 'mass (g)'
+    mass_column = 'Mass (g)' if 'Mass (g)' in df.columns else 'mass (g)'
+    
+    df = df.drop_nulls(subset=['Latitude', 'Longitude', mass_column, 'Year'])
+    
+    # Filter out rows where Year is larger than current year
+    df = df.filter(pl.col('Year') <= current_year)
+    
     df = df.with_columns([
-        (pl.col('Mass (g)') / 1000).alias('Mass (kg)')
-    ]).drop('Mass (g)')
+        (pl.col(mass_column) / 1000).alias('Mass (kg)')
+    ]).drop(mass_column)
+    
     return df
 
 try:
-    sql = text("""SELECT *FROM data_processing.dbo.Meteorite_Landings_20240927
-                WHERE year <= YEAR(GETDATE()) and nametype = 'valid'
-                order by year desc
-""")
-    
-    # Load and process data
-    with st.spinner("Loading and processing data..."):
-        df = process_data(rename_columns(load_data(sql, engine)))
+    df = load_data()
+    df = rename_columns(df)
+    df = process_data(df)
     
     st.success("Data loaded successfully!")
 
@@ -68,6 +64,7 @@ try:
     - **Relict**: This term is used for meteorites that were once considered valid but have been reclassified or merged with other meteorites. 
     They are no longer considered separate, valid meteorites but are kept in the database for historical reasons.
     """)
+
     # Interactive map
     st.subheader("Meteorite Landings Map")
     df_pandas = df.to_pandas()
@@ -78,7 +75,7 @@ try:
                             hover_name="Name",
                             hover_data=["Year", "Mass (kg)", "Classification"],
                             color="Fall Status",
-                            color_continuous_scale=color_scale,
+                            color_discrete_map={"Fell": "#1E88E5", "Found": "#FFA000"},
                             size="Mass (kg)",
                             zoom=1,
                             height=600)
@@ -86,16 +83,16 @@ try:
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # 
+    # Data explorer
     st.subheader("🔍 Data Explorer")
     num_rows = st.slider("Number of rows to display", 5, 50, 10)
     st.dataframe(df.head(num_rows))
 
-    # 
+    # Data summary
     st.subheader("📊 Data Summary")
     st.write(df.describe())
 
-    # 
+    # Additional insights
     st.subheader("📈 Additional Insights")
     col1, col2 = st.columns(2)
 
@@ -107,14 +104,16 @@ try:
 
     with col2:
         st.write("Meteorite Landings by Year")
-        yearly_counts = df.group_by("Year").agg(pl.len()).sort("Year")
+        yearly_counts = df.group_by("Year").agg(pl.count()).sort("Year")
         fig = px.line(yearly_counts.to_pandas(), x="Year", y="count")
         st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
+    st.write("Current DataFrame Schema:")
+    st.write(df.schema) if 'df' in locals() else st.write("DataFrame not created")
 
 st.sidebar.header("About")
-st.sidebar.info("Not all meteorites are created equal. Where are they? Caveat: some meteorites without mass and location data are not included.")
+st.sidebar.info("Not all meteorites are created equal. Where are they? Caveat: some meteorites without mass and location data are not included. Data is filtered to include only meteorites up to the current year.")
 st.sidebar.header("Data Source")
 st.sidebar.info("This comprehensive data set from The Meteoritical Society contains information on all of the known meteorite landings. The Fusion Table is collected by Javier de la Torre.")
